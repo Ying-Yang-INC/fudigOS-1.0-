@@ -10,7 +10,7 @@ jobs:
       - name: Install live-build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y live-build curl gnupg
+          sudo apt-get install -y live-build curl gnupg debian-archive-keyring
 
       - name: Configure fudigOS with Chrome and Bottles
         run: |
@@ -21,11 +21,11 @@ jobs:
             --iso-application "fudigOS" \
             --iso-volume "fudigOS_Live" \
             --iso-publisher "fudigOS Project" \
-            --image-name "fudigOS" \
+            --keyring-packages debian-archive-keyring \
             --archive-areas "main contrib non-free non-free-firmware" \
             --bootappend-live "boot=live components hostname=fudigos username=user quiet splash"
 
-          # Add desktop environment, Flatpak, Wine, and system utilities
+          # Pacotes do sistema, interface XFCE, Wine64, Flatpak e Instalador
           mkdir -p config/package-lists
           cat << 'EOF' > config/package-lists/fudigos.list.chroot
           task-xfce-desktop
@@ -34,25 +34,27 @@ jobs:
           wine
           wine64
           winetricks
+          calamares
+          calamares-settings-debian
           curl
           wget
           xdg-utils
           neofetch
           EOF
 
-          # Add Google Chrome repository and key
+          # Repositório oficial do Google Chrome
           mkdir -p config/archives
           curl -fsSL https://google.com | gpg --dearmor > config/archives/google-chrome.key.chroot
           echo "deb [arch=amd64] http://google.com stable main" > config/archives/google-chrome.list.chroot
           echo "google-chrome-stable" >> config/package-lists/fudigos.list.chroot
 
-          # Rebrand OS identity to fudigOS and install Bottles
+          # Personalização do fudigOS e configuração do Bottles
           mkdir -p config/hooks/normal
           cat << 'EOF' > config/hooks/normal/0100-setup-fudigos.hook.chroot
           #!/bin/bash
           set -e
 
-          # 1. Rebrand OS release files to fudigOS
+          # 1. Identidade visual do fudigOS
           cat << 'OSREL' > /etc/os-release
           PRETTY_NAME="fudigOS 1.0"
           NAME="fudigOS"
@@ -66,11 +68,29 @@ jobs:
           echo "fudigOS 1.0 \n \l" > /etc/issue
           echo "fudigOS 1.0" > /etc/issue.net
 
-          # 2. Install Bottles from Flathub for 64-bit Windows apps
+          # 2. Adiciona o repositório Flathub
           flatpak remote-add --if-not-exists flathub https://flathub.org
-          flatpak install -y flathub com.usebottles.bottles
 
-          # 3. Associate .exe and .msi files with Bottles
+          # 3. Script de primeiro boot para instalar o Bottles sem erro de sandbox
+          cat << 'FIRSTBOOT' > /usr/local/bin/install-bottles.sh
+          #!/bin/bash
+          if ! flatpak list | grep -q com.usebottles.bottles; then
+            flatpak install -y --noninteractive flathub com.usebottles.bottles
+            rm -f /etc/xdg/autostart/install-bottles.desktop
+          fi
+          FIRSTBOOT
+          chmod +x /usr/local/bin/install-bottles.sh
+
+          mkdir -p /etc/xdg/autostart
+          cat << 'AUTOSTART' > /etc/xdg/autostart/install-bottles.desktop
+          [Desktop Entry]
+          Type=Application
+          Name=Setup Bottles for Windows Apps
+          Exec=/usr/local/bin/install-bottles.sh
+          Terminal=false
+          AUTOSTART
+
+          # 4. Associa arquivos .exe e .msi ao Bottles
           mkdir -p /etc/xdg
           cat << 'MIME' > /etc/xdg/mimeapps.list
           [Default Applications]
@@ -85,8 +105,12 @@ jobs:
           cd ~/fudigos
           sudo lb build
 
-      - name: Upload fudigOS ISO Artifact
+      - name: Rename and Upload fudigOS ISO Artifact
+        run: |
+          mv ~/fudigos/*.iso ~/fudigos/fudigOS-1.0-amd64.iso
+        
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: fudigOS-1.0-amd64-ISO
-          path: ~/fudigos/*.iso
+          path: ~/fudigos/fudigOS-1.0-amd64.iso
